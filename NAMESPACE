@@ -7,7 +7,7 @@ export("cpt.mean", "cpt.meanvar", "cpt.var","cpt.reg")
 export("BINSEG", "decision", "penalty_decision","PELT","class_input")
 exportClasses(cpt,cpt.reg,cpt.range)
 exportMethods(plot,summary,show,nseg,logLik,likelihood,fitted,residuals,data.set,data.set.ts,cpts,cpts.full, cpts.ts,cpttype,distribution,test.stat,
-	method,ncpts,ncpts.max,param.est,param, coef,pen.type,pen.value,pen.value.full, minseglen, seg.len,"cpts<-","cpttype<-","data.set<-","distribution<-","test.stat<-","ncpts.max<-","param.est<-","pen.type<-",
-	"pen.value<-", "method<-", "cpts.full<-", "minseglen<-","pen.value.full<-")
+	method,ncpts,ncpts.max,param.est,param, coef,pen.type,pen.value,pen.value.full, minseglen, seg.len,conf.set,"cpts<-","cpttype<-","data.set<-","distribution<-","test.stat<-","ncpts.max<-","param.est<-","pen.type<-",
+	"pen.value<-", "method<-", "cpts.full<-", "minseglen<-","pen.value.full<-","conf.set<-")
 
 useDynLib(changepoint, .registration=TRUE)

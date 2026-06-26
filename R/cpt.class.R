@@ -212,6 +212,19 @@ setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character"
 	setMethod("param.est","cpt",function(object) object@param.est)
 	setMethod("param.est","cpt.reg",function(object) object@param.est)
 
+	if(!isGeneric("conf.set")) {
+		if (is.function("conf.set")){
+			fun <- conf.set
+		}
+		else {fun <- function(object){
+				standardGeneric("conf.set")
+			}
+		}
+		setGeneric("conf.set", fun)
+	}
+	setMethod("conf.set","cpt",function(object) object@conf.set)
+	setMethod("conf.set","cpt.reg",function(object) object@conf.set)
+
 
   setMethod("coef","cpt",function(object) object@param.est)
 	setMethod("coef","cpt.reg",function(object) object@param.est)
@@ -399,6 +412,16 @@ setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character"
 	})
 	setReplaceMethod("param.est", "cpt.reg", function(object, value) {
 		object@param.est <- value
+		return(object)
+	})
+
+	setGeneric("conf.set<-", function(object, value) standardGeneric("conf.set<-"))
+	setReplaceMethod("conf.set", "cpt", function(object, value) {
+		object@conf.set <- value
+		return(object)
+	})
+	setReplaceMethod("conf.set", "cpt.reg", function(object, value) {
+		object@conf.set <- value
 		return(object)
 	})
 

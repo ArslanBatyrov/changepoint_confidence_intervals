@@ -1,6 +1,6 @@
-setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character", 	test.stat="character",pen.type="character",pen.value="numeric",minseglen="numeric",cpts="numeric",ncpts.max="numeric",param.est="list",date="character",version="character"),prototype=prototype(cpttype="Not Set",date=date(),version=as(packageVersion("changepoint"),'character')))
+setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character", 	test.stat="character",pen.type="character",pen.value="numeric",minseglen="numeric",cpts="numeric",ncpts.max="numeric",param.est="list",date="character",version="character",conf.set="list"),prototype=prototype(cpttype="Not Set",date=date(),version=as(packageVersion("changepoint"),'character')))
 
-	setClass("cpt.reg",slots=list(data.set="matrix", cpttype="character", method="character", test.stat="character",pen.type="character",pen.value="numeric",minseglen="numeric",cpts="numeric",ncpts.max="numeric",param.est="list",date="character",version="character"),prototype=prototype(cpttype="regression",date=date(),version=as(packageVersion("changepoint"),"character")))
+	setClass("cpt.reg",slots=list(data.set="matrix", cpttype="character", method="character", test.stat="character",pen.type="character",pen.value="numeric",minseglen="numeric",cpts="numeric",ncpts.max="numeric",param.est="list",date="character",version="character",conf.set="list"),prototype=prototype(cpttype="regression",date=date(),version=as(packageVersion("changepoint"),"character")))
 
 #   setClass("cpt", representation(), prototype())
 # # cpts is the optimal segementation

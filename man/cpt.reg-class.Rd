@@ -48,6 +48,7 @@ Objects can be created by calls of the form \code{new("cpt", ...)}.
     \item{\code{param.est}:}{Object of class \code{"list"}, list where each element is a vector of parameter estimates, if requested }
     \item{\code{date}:}{Object of class \code{"character"}, date and time the changepoint analysis was run }
     \item{\code{version}:}{Object of class \code{"character"}, version number of the package used when the analysis was run.}
+    \item{\code{conf.set}:}{Object of class \code{"list"}, list of confidence sets for the changepoint locations, one element per confidence level requested. Empty by default, populated on request. }
   }
 }
 \section{Methods}{

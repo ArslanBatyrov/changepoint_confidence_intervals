@@ -40,7 +40,10 @@ void PELTC(char** cost_func,
 	  double* lastchangelike, // stores likelihood up to that time using
 	                          //optimal changepoint locations up to that time
 	  int* lastchangecpts, // stores last changepoint locations
-	  int* numchangecpts //stores the current number of changepoints
+	  int* numchangecpts,
+	  int* conf_set, /*on/off switch*/
+	  int* checklist_positions, // Output: raw near-miss candidate positions (space allocated by R)
+	  double* checklist_likes // Output: raw near-miss candidate costs (space allocated by R)
 	  )
 {
   // R code does know.mean and fills mu if necessary
@@ -211,6 +214,20 @@ void PELTC(char** cost_func,
     last=lastchangecpts[last];
     ncpts+=1;
   }
+  /* confidence-set capture: if conf_set is TRUE, for now it is not the real
+     logic but a fake placeholder to prove the wiring; the real capture of
+     checklists and their costs will replace this block later */
+  if(*conf_set == 1){
+    /* buffer length must not exceed the R memory allocated */
+    int buflen = (*minseglen) * (*minseglen);
+    int fill = 3;
+    if(fill > buflen){ fill = buflen; } /* bounds guard: stay inside R's allocation */
+    for(i = 0; i < fill; i++){
+      checklist_positions[i] = i + 1; /* fake positions */
+      checklist_likes[i] = 10 * (i + 1); /* fake paired costs */
+    }
+  }
+
   free(tmpt);
  err3:  free(tmplike);
  err2:  free(checklist);

@@ -229,6 +229,19 @@ setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character"
   setMethod("coef","cpt",function(object) object@param.est)
 	setMethod("coef","cpt.reg",function(object) object@param.est)
 
+# Next is the confint method, not a generic, following the
+# coef precedent above; the method already exists in the
+# stats package. Our methods package turns it from S3 into S4.
+# Notice that parm is not used, it is added for compatibility with the generic;
+# it might be used for something in the future but currently it is redundant.
+	setMethod("confint","cpt",function(object, parm, level=0.95, ...){
+	  new.entry = confidence_set(object, level=level)
+	  existing = conf.set(object)
+	  existing[[as.character(level)]] = new.entry
+	  conf.set(object) = existing
+	  return(object)
+	})
+
 # ncpts function
 	if(!isGeneric("ncpts")) {
 		if (is.function("ncpts")){

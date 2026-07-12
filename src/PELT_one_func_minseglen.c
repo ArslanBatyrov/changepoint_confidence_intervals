@@ -43,7 +43,10 @@ void PELTC(char** cost_func,
 	  int* numchangecpts,
 	  int* conf_set, /*on/off switch*/
 	  int* checklist_positions, // Output: raw near-miss candidate positions (space allocated by R)
-	  double* checklist_likes // Output: raw near-miss candidate costs (space allocated by R)
+	  double* checklist_likes, // Output: raw near-miss candidate costs (space allocated by R)
+	  int* cs_len //both input and output; first it carries the first guess from R (ex. minseglen^2),
+	              //then if C requires more memory it writes back and replaces the first guess with
+	              //the required memory size
 	  )
 {
   // R code does know.mean and fills mu if necessary
@@ -214,18 +217,22 @@ void PELTC(char** cost_func,
     last=lastchangecpts[last];
     ncpts+=1;
   }
-  /* confidence-set capture: if conf_set is TRUE, for now it is not the real
-     logic but a fake placeholder to prove the wiring; the real capture of
-     checklists and their costs will replace this block later */
+  /*confidence-set capture in case conf_set = TRUE, for now it is not the real logic but a fake
+    placeholder to prove the wiring; the real capture of checklists and their costs will replace this
+    block later. However the memory contract/logic is real here, the cs_len arrives with the memory
+    and then gets the needed value from C, so that it can be compared back to the first guess in R.
+    Thus, recomputed if the first guess was too small. Computation of number of cpts is not real (3
+    is a placeholder for now)*/
   if(*conf_set == 1){
-    /* buffer length must not exceed the R memory allocated */
-    int buflen = (*minseglen) * (*minseglen);
-    int fill = 3;
-    if(fill > buflen){ fill = buflen; } /* bounds guard: stay inside R's allocation */
-    for(i = 0; i < fill; i++){
-      checklist_positions[i] = i + 1; /* fake positions */
-      checklist_likes[i] = 10 * (i + 1); /* fake paired costs */
+    int capacity = *cs_len; /*capacity is the memory allocated by R, it is the first guess of how many changepoints will be needed*/
+    int needed = 3; /*fake needed value, must be the correct number of changepoints allocated here*/
+    for(i = 0; i < needed; i++){
+      if(i < capacity){
+        checklist_positions[i] = i + 1; /*fake positions*/
+        checklist_likes[i] = 10 * (i + 1); /*fake paired costs*/
+      }
     }
+    *cs_len = needed; /*reporting the real required amount to R*/
   }
 
   free(tmpt);

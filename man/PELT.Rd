@@ -11,7 +11,7 @@ This function is called by \code{cpt.mean}, \code{cpt.var} and \code{cpt.meanvar
 WARNING: No checks on arguments are performed!
 }
 \usage{
-PELT(sumstat, pen = 0, cost_func = "norm.mean", shape = 1, minseglen = 1)
+PELT(sumstat, pen = 0, cost_func = "norm.mean", shape = 1, minseglen = 1, conf.set = FALSE)
 }
 \arguments{
   \item{sumstat}{
@@ -28,6 +28,9 @@ PELT(sumstat, pen = 0, cost_func = "norm.mean", shape = 1, minseglen = 1)
 }
   \item{minseglen}{
   Positive integer giving the minimum segment length (no. of observations between changes), default is 1.  No checks are performed on the input value so it could be larger than feasible to have changes in the data.
+  }
+  \item{conf.set}{
+  Logical, default is \code{FALSE}.  When \code{TRUE}, the C code additionally captures the raw near-miss candidate positions and their costs needed to build a confidence set, and returns them as extra list elements.  Must be strictly \code{TRUE} or \code{FALSE}.
   }
 }
 \details{

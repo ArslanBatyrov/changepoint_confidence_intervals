@@ -43,3 +43,103 @@ confidence_set = function(object, level = 0.95) {
     checklist_likes = pelt$checklist_likes # fake pattern as well for now
   ))
 }
+
+# not a fully complete code, must be reviewed
+# confidence set core, ported from Owens code (PELT_CS_fns.R).
+# all internal pure R, costs arive alredy calcualted and we never recompute them.
+# indexing: positon t is stored at slot t+1 (R has no slot 0)
+
+# runmin from Owens code, renamed with cs_ to aviod clashes
+cs_runmin = function(v, k){
+  out = NULL
+  for(i in 1:(length(v)-k+1)){
+    out = c(out, min(v[i:(i+k-1)], na.rm=TRUE))
+  }
+  return(out)
+}
+
+# lookup table: how many optimal cpts stand before each positon,
+# 0 is seeded with -1 so candiate 0 pays no penatly
+cs_no_op_cpts = function(lastchangecpts){
+  n = length(lastchangecpts) - 1
+  no_op = rep(NA_integer_, n + 1)
+  no_op[1] = -1
+  for(t in 1:n){
+    no_op[t+1] = no_op[lastchangecpts[t+1] + 1] + 1
+  }
+  return(no_op)
+}
+
+# confidnece level -> cost bugdet, fromula from Owens code as it is.
+# smaller alpha -> bigger set (CS1)
+cs_penalty = function(op_cpts, alpha){
+  cpts = c(0, op_cpts)
+  n = op_cpts[length(op_cpts)]
+  if(length(cpts) == 2){ # no changepoints detected (op_cpts holds just n)
+    nj.maxi = n/20
+  } else {
+    nj.maxi = min(max(cs_runmin(diff(cpts), 2)), n/4 - n*5/24)
+  }
+  return(3/2 + 2*log(2*nj.maxi) - 2*log(alpha))
+}
+
+# keeps every near miss candiate wihtin the budget from the optimal,
+# row i of CS = candidates for the cpt before op_cpts[i], NA padded
+cs_core = function(op_cpts, checklists, no_op_cpts, penalty, level=0.95, cs.penalty=NULL){
+  alpha = 1 - level
+  cpts = c(0, op_cpts)
+  n = op_cpts[length(op_cpts)]
+  if(is.null(cs.penalty)){ cs.penalty = cs_penalty(op_cpts, alpha) }
+
+  CS = CS.likes = matrix(NA_real_, nrow=length(cpts)-1, ncol=n)
+  for(i in length(cpts):2){
+    x = checklists[[i-1]]$positions # near miss candidates at time cpts[i]
+    y = checklists[[i-1]]$likes # thier pure costs
+    # pure cost + one penalty per cpt on the candidates path
+    semipurelikes = y + (no_op_cpts[x+1] + 1) * penalty
+    op.index = which(x == cpts[i-1])
+    if(length(op.index) != 1){
+      stop("optimal changepoint ", cpts[i-1], " not found in the checklist at time ", cpts[i])
+    }
+    op.like = semipurelikes[op.index]
+    CSvals.index = which(semipurelikes >= op.like & semipurelikes <= op.like + cs.penalty)
+    CS.likes[i-1, seq_along(CSvals.index)] = semipurelikes[CSvals.index]
+    CS[i-1, seq_along(CSvals.index)] = x[CSvals.index]
+  }
+  return(list(CS=CS, CS.likes=CS.likes, cs.penalty=cs.penalty))
+}
+
+# the "bunny hop", walks the backpionters back untill 0
+cs_op_seg = function(fcpt=NULL, last, lastchangecpts){
+  while(last != 0){
+    fcpt = c(fcpt, last)
+    last = lastchangecpts[last + 1]
+  }
+  return(sort(fcpt))
+}
+
+# CS matrix -> whole alternitive segmentaions, out[[k]] = the ones with k cpts
+# (n counts as one aswell)
+cs_backtrack = function(lastchangecpts, CS_mat, est_cpts){
+  out = list()
+  out[[length(est_cpts)]] = est_cpts
+  fcpt = NULL
+  for(cpt.i in nrow(CS_mat):1){
+    fcpt = c(fcpt, est_cpts[cpt.i]) # fixing the optimal cpts later then this row
+    CS.vec = CS_mat[cpt.i, !is.na(CS_mat[cpt.i,])]
+    for(CS.vec.i in seq_along(CS.vec)){
+      if(CS.vec[CS.vec.i] == 0){
+        # candidate 0 = no earlier cpt, segmentation is just fcpt
+        out[[length(fcpt)]] = rbind(out[[length(fcpt)]], sort(fcpt))
+      } else {
+        seg = cs_op_seg(fcpt=fcpt, last=CS.vec[CS.vec.i], lastchangecpts=lastchangecpts)
+        if(length(seg) > length(out)){
+          out[[length(seg)]] = seg
+        } else {
+          out[[length(seg)]] = rbind(out[[length(seg)]], seg)
+        }
+      }
+    }
+  }
+  return(out)
+}

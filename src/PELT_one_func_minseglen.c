@@ -42,11 +42,12 @@ void PELTC(char** cost_func,
 	  int* lastchangecpts, // stores last changepoint locations
 	  int* numchangecpts,
 	  int* conf_set, /*on/off switch*/
-	  int* checklist_positions, // Output: raw near-miss candidate positions (space allocated by R)
-	  double* checklist_likes, // Output: raw near-miss candidate costs (space allocated by R)
-	  int* cs_len //both input and output; first it carries the first guess from R (ex. minseglen^2),
-	              //then if C requires more memory it writes back and replaces the first guess with
-	              //the required memory size
+	  int* checklist_positions, // Output: near-miss candidate positions, an R matrix passed as
+	                            // flat column-major memory (space allocated by R)
+	  double* checklist_likes, // Output: paired costs, same matrix shape as positions
+	  int* cs_dim //length 2, both input and output; arrives as c(rows, cols) capacity of the
+	              //matrix R allocated (rows = optimal cpts, cols = candidate slots), and C
+	              //writes back the dims it actually needed so R can re-run once with exact size
 	  )
 {
   // R code does know.mean and fills mu if necessary
@@ -217,22 +218,72 @@ void PELTC(char** cost_func,
     last=lastchangecpts[last];
     ncpts+=1;
   }
-  /*confidence-set capture in case conf_set = TRUE, for now it is not the real logic but a fake
-    placeholder to prove the wiring; the real capture of checklists and their costs will replace this
-    block later. However the memory contract/logic is real here, the cs_len arrives with the memory
-    and then gets the needed value from C, so that it can be compared back to the first guess in R.
-    Thus, recomputed if the first guess was too small. Computation of number of cpts is not real (3
-    is a placeholder for now)*/
+  /*real capture, runs only if conf_set = TRUE. we only know the optimal cpt times after the
+    backtrack, so we just replay the forward pass again and this time at every optimal cpt we
+    save the surviving candidates into that cpts matrix row (after the prune, like the mock).
+    costs are saved PURE, no penatly: pure = tmplike - numchangecpts[x]*pen, so no new array.
+    matrix is column-major, cell (row r, col i) is at [i*rowcap + r], rowcap is the ALLOCATED
+    rows not the needed ones. empty cells stay NA. row r = r-th smallest optimal cpt.*/
   if(*conf_set == 1){
-    int capacity = *cs_len; /*capacity is the memory allocated by R, it is the first guess of how many changepoints will be needed*/
-    int needed = 3; /*fake needed value, must be the correct number of changepoints allocated here*/
-    for(i = 0; i < needed; i++){
-      if(i < capacity){
-        checklist_positions[i] = i + 1; /*fake positions*/
-        checklist_likes[i] = 10 * (i + 1); /*fake paired costs*/
-      }
+    int rowcap = cs_dim[0]; /*matrix dims R allocated, our capacity*/
+    int colcap = cs_dim[1];
+    int rowneed = ncpts; /*one row per optimal cpt, n counts as one*/
+    int colneed = 0; /*widest checklist seen, reported back so R can re-run exact*/
+    int r = 0; /*next row = next optimal cpt (ascending) waiting for its capture*/
+    int target;
+    for(i = 0; i < rowcap*colcap; i++){
+      checklist_positions[i] = NA_INTEGER;
+      checklist_likes[i] = NA_REAL;
     }
-    *cs_len = needed; /*reporting the real required amount to R*/
+    /*optimal cpts before the main loop starts (t < 2*minseglen) never had a checklist,
+      the only possible candidate is 0 and its pure cost is lastchangelike itself
+      (one segment, prefill added no penalty)*/
+    while(r < ncpts && cptsout[ncpts-1-r] < 2*(*minseglen)){
+      target = cptsout[ncpts-1-r];
+      if(r < rowcap && colcap > 0){
+        checklist_positions[r] = 0; /*cell (r,0): col 0 so index is just r*/
+        checklist_likes[r] = lastchangelike[target];
+      }
+      if(colneed < 1){ colneed = 1; }
+      r++;
+    }
+    /*replay: reset the checklist to its starting state and walk tstar forward again
+      with the same cost calls and the same prune rule as the first pass*/
+    nchecklist = 2;
+    checklist[0] = 0;
+    checklist[1] = *minseglen;
+    for(tstar = 2*(*minseglen); tstar < (*n+1) && r < ncpts; tstar++){
+      R_CheckUserInterrupt();
+      for(i = 0; i < nchecklist; i++){
+        tmplike[i] = lastchangelike[checklist[i]] + costfunction(*(sumstat+tstar)-*(sumstat+checklist[i]),*(sumstat + *n + 1 +tstar)-*(sumstat + *n + 1 +checklist[i]),*(sumstat + *n + *n + 2 +tstar)-*(sumstat + *n + *n + 2 +checklist[i]), tstar-checklist[i], *shape)+*pen;
+      }
+      /*prune exactly like the first pass, but compact tmplike alongside checklist
+        so position/cost pairs stay aligned for the capture below*/
+      nchecktmp = 0;
+      for(i = 0; i < nchecklist; i++){
+        if(tmplike[i] <= (lastchangelike[tstar]+*pen)){
+          checklist[nchecktmp] = checklist[i];
+          tmplike[nchecktmp] = tmplike[i];
+          nchecktmp += 1;
+        }
+      }
+      nchecklist = nchecktmp;
+      if(tstar == cptsout[ncpts-1-r]){
+        /*this tstar is an optimal cpt: dump the surviving candidates into row r*/
+        for(i = 0; i < nchecklist; i++){
+          if(r < rowcap && i < colcap){
+            checklist_positions[i*rowcap + r] = checklist[i];
+            checklist_likes[i*rowcap + r] = tmplike[i] - numchangecpts[checklist[i]]*(*pen);
+          }
+        }
+        if(nchecklist > colneed){ colneed = nchecklist; }
+        r++;
+      }
+      *(checklist+nchecklist) = tstar-(*minseglen-1);
+      nchecklist += 1;
+    }
+    cs_dim[0] = rowneed; /*reporting the true dims back so R can compare with its guess*/
+    cs_dim[1] = colneed;
   }
 
   free(tmpt);

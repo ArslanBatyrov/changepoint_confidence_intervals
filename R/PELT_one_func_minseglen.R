@@ -30,55 +30,63 @@ PELT = function(sumstat,pen=0, cost_func = "norm.mean", shape = 1, minseglen = 1
   storage.mode(lastchangecpts) = 'integer'
   storage.mode(numchangecpts) = 'integer'
 
-  # conf_set output buffers for C will be allocated here
-  # the previous logic of minseglen^2 or n * ncpts both were inefficient
-  # So, currently the next method we are going to use is two fold
-  #  1: max(We allocate minseglen^2, 30) first
-  #  2: if it is enough -> Operation is done, if not:
-  #  3: C rewrites the cs_len and hands it to R, so that R knows exactly
-  #  the memory that is required to be allocated. Second run occurs
-  buflen = max(as.integer(minseglen) * as.integer(minseglen), 30L)
+  # conf_set output buffers for C
+  # new design instead of flat vectors with lost grouping
+  # we hand C a pre shaped matrix, row i = candidates of optimal cpt i, cols = candidate slots (Idea of Rebecca :)
+  # so the grouping survives the C -> R trip for free
+  # dims below are only a first guess; C writes the truly needed dims into cs_dim (arg 15)
+  # and if the guess undershot in either direction we re run once with the exact size
+  # (same logic as the v1 flat-vector version, just sending a matrix instead of a flat vector)
+  nrow_guess = 10L
+  ncol_guess = 30L
 
   # one C call to PELTC, building a helper function to make runs
-  # simpler as we might call it twice in case our first guess memory allocation was wrong
-  # meaning cs_len < needed
-  run_peltc = function(buflen){
+  # simpler as we might call it twice in case our first guess was wrong
+  run_peltc = function(nrows, ncols){
     .C('PELTC', cost_func, sumstat, as.integer(n), as.double(pen), cptsout,
        as.integer(error), as.double(shape), as.integer(minseglen),
        lastchangelike, lastchangecpts, numchangecpts, conf.flag,
-       rep(0L, buflen), rep(0, buflen), as.integer(buflen))
+       matrix(0L, nrows, ncols), matrix(0, nrows, ncols),
+       as.integer(c(nrows, ncols)))
   }
 
   # answer=.C('PELT',cost_func, y3, y2,y,as.integer(n),as.double(pen),cptsout,as.integer(error),as.double(shape))
-  answer = run_peltc(buflen)
+  answer = run_peltc(nrow_guess, ncol_guess)
 
   if(answer[[6]]>0){
     stop("C code error:",answer[[6]],call.=F)
   }
   if(conf.flag == 1){
-    needed = answer[[15]]          # count C reported it needed
-    captured = min(needed, buflen) # how many the first pass wrote
-    if(needed > buflen){
-      # If our first guess undershoot: reallocate to the exact size and re-run once.
+    needed = answer[[15]]  # c(rows, cols) C reported it truly needed
+    rows_have = nrow_guess # dims of the pass we are keeping
+    cols_have = ncol_guess
+    if(needed[1] > rows_have || needed[2] > cols_have){
+      # If our first guess undershoot in either dimension: reallocate exact and re-run once.
       # Wrap the possible too large allocation in tryCatch
       # I did this as it was the way to make a universal upside cap
       # that is simple, as if we were to try to check for % of total RAM available
-      # or what R has access to, we would make it excessively complicated and each device might need
+      # or what R has access to, we would make it ultra duper complicated and each device might need
       # its own approach, while using tryCatch will give the same outcome
-      # ask whether this is a good idea in a convo with Rebecca and Owen
-      answer2 = tryCatch(run_peltc(needed), error = function(e){
-        warning("confidence-set buffer too large to allocate (", needed,
-                " slots); confidence set may be incomplete", call.=FALSE)
+      # asked whether this is a good idea in a convo with Rebecca and Owen and the idea was approved.
+      answer2 = tryCatch(run_peltc(needed[1], needed[2]), error = function(e){
+        warning("confidence-set buffer too large to allocate (", needed[1], " x ", needed[2],
+                "); confidence set may be incomplete", call.=FALSE)
         NULL
       })
       if(!is.null(answer2)){
         if(answer2[[6]]>0){ stop("C code error:",answer2[[6]],call.=F) }
         answer = answer2
-        captured = needed
+        rows_have = needed[1]
+        cols_have = needed[2]
       }
     }
-    # trim off the unused padding so R only sees the real captured entries
-    return(list(lastchangecpts=answer[[10]],cpts=sort(answer[[5]][answer[[5]]>0]), lastchangelike=answer[[9]], ncpts=answer[[11]], checklist_positions=answer[[13]][seq_len(captured)], checklist_likes=answer[[14]][seq_len(captured)]))
+    # .C drops the dim attribute on return, so we re wrap the flat vector back
+    # into the matrix shape and cut off the padding rows/cols we did not need
+    pos = matrix(answer[[13]], nrow = rows_have, ncol = cols_have)
+    lik = matrix(answer[[14]], nrow = rows_have, ncol = cols_have)
+    keep_rows = seq_len(min(needed[1], rows_have))
+    keep_cols = seq_len(min(needed[2], cols_have))
+    return(list(lastchangecpts=answer[[10]],cpts=sort(answer[[5]][answer[[5]]>0]), lastchangelike=answer[[9]], ncpts=answer[[11]], checklist_positions=pos[keep_rows, keep_cols, drop=FALSE], checklist_likes=lik[keep_rows, keep_cols, drop=FALSE]))
   }
   return(list(lastchangecpts=answer[[10]],cpts=sort(answer[[5]][answer[[5]]>0]), lastchangelike=answer[[9]], ncpts=answer[[11]]))
 

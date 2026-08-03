@@ -6,7 +6,10 @@
 # In the docs, we will describe conf_set only.
 
 confidence_set = function(object, level = 0.95) {
-  if(!is(object, "cpt")){stop("object must be a cpt or cpt.range, cpt.reg is not supported")}
+  if(!is(object, "cpt")){stop("object must be a cpt object, cpt.reg is not supported")}
+  # cpt.range slips through the method check (CROPS stores method = PELT) but carries a
+  # penalty RANGE not a single value, the maths would run on garbage. MUST add a cpt_range soon
+  if(is(object, "cpt.range")){stop("confidence sets are not yet supported for cpt.range objects (e.g. CROPS fits)")}
   if(object@method != "PELT"){stop("confidence sets are currently only implemented for method = 'PELT'")}
 
   # Turning the human-readable test.stat into a C-readable cost-function key
@@ -35,12 +38,27 @@ confidence_set = function(object, level = 0.95) {
   if(!all(cpts(object) %in% pelt$cpts)){
     warning("re-run PELT did not reproduce the object's changepoints; confidence set may not correspond to the fit")
   }
+
+  # matrix rows from C -> cs_core style checklists, NA padding stripped
+  # row i = near miss candidates of optimal cpt i and thier pure costs
+  checklists = lapply(seq_len(nrow(pelt$checklist_positions)), function(i){
+    keep = !is.na(pelt$checklist_positions[i, ])
+    list(positions = as.numeric(pelt$checklist_positions[i, keep]),
+         likes = as.numeric(pelt$checklist_likes[i, keep]))
+  })
+
+  # the actual confidence set calculation, all validated against Owens code
+  lcc = as.numeric(pelt$lastchangecpts)
+  core = cs_core(pelt$cpts, checklists, cs_no_op_cpts(lcc), pen.value(object), level = level)
+  segs = cs_backtrack(lcc, core$CS, pelt$cpts)
+
   return(list(
     level = level,
-    cpts = pelt$cpts,
-    lastchangecpts = pelt$lastchangecpts,
-    checklist_positions = pelt$checklist_positions, # fake pattern for now, will be real later
-    checklist_likes = pelt$checklist_likes # fake pattern as well for now
+    cpts = pelt$cpts, # optimal cpts, n included as the last one
+    cs.penalty = core$cs.penalty, # the budget that was used
+    CS = core$CS, # row i = accepted candidates for the cpt before cpts[i], NA padded
+    CS.likes = core$CS.likes,
+    segmentations = segs # [[k]] = all plausible segmentations with k cpts
   ))
 }
 

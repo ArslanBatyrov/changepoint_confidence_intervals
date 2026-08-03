@@ -13,12 +13,18 @@ confidence_set = function(object, level = 0.95) {
   if(object@method != "PELT"){stop("confidence sets are currently only implemented for method = 'PELT'")}
 
   # Turning the human-readable test.stat into a C-readable cost-function key
-  if(test.stat(object) != "Normal"){stop("confidence set supports test.stat = 'Normal' only")}
-  costfunc = switch(cpttype(object),
-                    "mean" = "mean.norm",
-                    "variance" = "var.norm",
-                    "mean and variance" = "meanvar.norm",
-                    stop("Unsupported changepoint type: ", cpttype(object)))
+  # opened up past Normal on mentors direction: we only wire the strings here (dist agnostic),
+  # Rebecca will go over the statistical side of the non Normal dists herself later
+  costfunc = switch(test.stat(object),
+                    "Normal" = switch(cpttype(object),
+                                      "mean" = "mean.norm",
+                                      "variance" = "var.norm",
+                                      "mean and variance" = "meanvar.norm",
+                                      stop("Unsupported changepoint type: ", cpttype(object))),
+                    "Exponential" = "meanvar.exp",
+                    "Gamma" = "meanvar.gamma",
+                    "Poisson" = "meanvar.poisson",
+                    stop("Unsupported test statistic: ", test.stat(object)))
   if(pen.type(object) == "MBIC"){costfunc = paste0(costfunc, ".mbic")}
 
   # I copied the sumstat formula from data_input.R for use here
@@ -31,8 +37,16 @@ confidence_set = function(object, level = 0.95) {
     stop("level must be a single number strictly between 0 and 1") # this is not used by C yet
   }
 
+  # gamma is the only cost function in C that actually reads shape, the fit stores it
+  # inside param.est (see the param method in cpt.class.R) so we can recover it from the object
+  shape = 1
+  if(test.stat(object) == "Gamma"){
+    shape = param.est(object)$shape
+    if(is.null(shape)){stop("cannot recover the gamma shape parameter from the object, refit with param.estimates = TRUE")}
+  }
+
   # Re-run PELT with the conf_set on
-  pelt = PELT(sumstat, pen = pen.value(object), cost_func = costfunc, minseglen = object@minseglen, conf.set = TRUE)
+  pelt = PELT(sumstat, pen = pen.value(object), cost_func = costfunc, shape = shape, minseglen = object@minseglen, conf.set = TRUE)
 
   # just a sanity check that the re-run agrees with the changepoints we already stored
   if(!all(cpts(object) %in% pelt$cpts)){

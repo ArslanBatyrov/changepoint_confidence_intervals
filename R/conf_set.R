@@ -62,17 +62,27 @@ confidence_set = function(object, level = 0.95) {
   })
 
   # the actual confidence set calculation, all validated against Owens code
+  # CS / CS.likes / cs.penalty stay internal (backtrack needs them), the user does not see them
   lcc = as.numeric(pelt$lastchangecpts)
   core = cs_core(pelt$cpts, checklists, cs_no_op_cpts(lcc), pen.value(object), level = level)
   segs = cs_backtrack(lcc, core$CS, pelt$cpts)
 
+  # tidy the segmentations for the user (mentors direction: show segmentations + optimal cpts only).
+  # cs_backtrack gives segs[[k]] = the segmentations with k cpts, but with NULL holes at the ks that
+  # have none and leftover rbind rownames, so: drop the holes, force every entry into a one row per
+  # segmentation matrix, clear the junk rownames and name each entry by its cpt count (n counts as one)
+  segs = segs[!vapply(segs, is.null, logical(1))]
+  segs = lapply(segs, function(s){
+    if(is.null(dim(s))){ s = matrix(s, nrow = 1) }
+    dimnames(s) = NULL # drop the junk rbind rownames entirely, no col names either
+    s
+  })
+  names(segs) = vapply(segs, ncol, integer(1))
+
   return(list(
     level = level,
     cpts = pelt$cpts, # optimal cpts, n included as the last one
-    cs.penalty = core$cs.penalty, # the budget that was used
-    CS = core$CS, # row i = accepted candidates for the cpt before cpts[i], NA padded
-    CS.likes = core$CS.likes,
-    segmentations = segs # [[k]] = all plausible segmentations with k cpts
+    segmentations = segs # [["k"]] = all plausible segmentations with k cpts
   ))
 }
 

@@ -75,15 +75,53 @@ confidence_set = function(object, level = 0.95) {
   segs = lapply(segs, function(s){
     if(is.null(dim(s))){ s = matrix(s, nrow = 1) }
     dimnames(s) = NULL # drop the junk rbind rownames entirely, no col names either
-    s
+    # "unique" keeps first occurence order and the backtrack seeds the optimal first,
+    # thus the first row is ALWAYS a row of the optimal cpts
+    unique(s)
   })
   names(segs) = vapply(segs, ncol, integer(1))
 
-  return(list(
+  out = list(
     level = level,
     cpts = pelt$cpts, # optimal cpts, n included as the last one
     segmentations = segs # [["k"]] = all plausible segmentations with k cpts
-  ))
+  )
+  # slap a tiny S3 class on top just so it prints nice, underneath it is still a plain list
+  # and segmentations still has the whole conf set in it, optimal included, nothing dropped
+  class(out) = "cpt.confset"
+  return(out)
+}
+
+# printing the confidence set: optimal cpts first, then everything else as alternatives.
+# the optimal is still inside segmentations, we just pull it out for the display
+print.cpt.confset = function(x, ...){
+  cat("Confidence set (level = ", x$level, ")\n\n", sep = "")
+  cat("Optimal changepoints:\n  ", paste(x$cpts, collapse = " "), "\n", sep = "")
+
+  # walk every segmentation group and keep the rows that are not the optimal one
+  alts = list()
+  for(g in x$segmentations){
+    for(r in seq_len(nrow(g))){
+      if(!identical(as.numeric(g[r, ]), as.numeric(x$cpts))){
+        alts[[length(alts) + 1]] = g[r, ]
+      }
+    }
+  }
+
+  if(length(alts) == 0){
+    cat("\nNo alternative segmentations at this level.\n")
+  } else {
+    cat("\nAlternative segmentations (", length(alts), "):\n", sep = "")
+    # cap the print so a big confidence set cannot flood the console, the data is all still there
+    show_n = min(length(alts), 20)
+    for(i in seq_len(show_n)){
+      cat("  ", paste(alts[[i]], collapse = " "), "\n", sep = "")
+    }
+    if(length(alts) > show_n){
+      cat("  ... and ", length(alts) - show_n, " more (see $segmentations)\n", sep = "")
+    }
+  }
+  invisible(x)
 }
 
 # not a fully complete code, must be reviewed

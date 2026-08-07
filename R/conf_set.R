@@ -6,6 +6,58 @@
 # In the docs, we will describe conf_set only.
 
 confidence_set = function(object, level = 0.95) {
+  cs_check_level(level)
+
+  # use the slot as a cache. the pricey bit (PELT + capture) is in cs_ingredients and
+  # doesnt care about the level, so do it once and stash it under "ingredients", reuse after.
+  # if the fit changed (cpts/penalty dont match) just redo it, dont serve old leftovers
+  existing = conf.set(object)
+  ing = existing[["ingredients"]]
+  if(is.null(ing) || !all(cpts(object) %in% ing$cpts) || !identical(ing$penalty, pen.value(object))){
+    ing = cs_ingredients(object)
+    existing[["ingredients"]] = ing
+  }
+
+  # the actual confidence set calculation, all validated against Owens code
+  # CS / CS.likes / cs.penalty stay internal (backtrack needs them), the user does not see them
+  # (MIGHT NEED TO ADD CS.likes to the output in the future though!)
+  core = cs_core(ing$cpts, ing$checklists, cs_no_op_cpts(ing$lcc), ing$penalty, level = level)
+  segs = cs_backtrack(ing$lcc, core$CS, ing$cpts)
+
+  # tidy the segmentations for the user.
+  # cs_backtrack gives segs[[k]] = the segmentations with k cpts, but with NULL holes at the ks that
+  # have none and leftover rbind rownames, so: drop the holes, force every entry into a one row per
+  # segmentation matrix, clear the junk rownames and name each entry by its cpt count (n counts as one)
+  segs = segs[!vapply(segs, is.null, logical(1))]
+  segs = lapply(segs, function(s){
+    if(is.null(dim(s))){ s = matrix(s, nrow = 1) }
+    dimnames(s) = NULL # drop the junk rbind rownames entirely, no col names either
+    # "unique" keeps first occurence order and the backtrack seeds the optimal first,
+    # thus the first row is ALWAYS a row of the optimal cpts
+    unique(s)
+  })
+  names(segs) = vapply(segs, ncol, integer(1))
+
+  out = list(
+    level = level,
+    cpts = ing$cpts, # optimal cpts, n included as the last one
+    segmentations = segs # [["k"]] = all plausible segmentations with k cpts
+  )
+  # slap a tiny S3 class on top just so it prints nice, underneath it is still a plain list
+  # and segmentations still has the whole conf set in it, optimal included, nothing dropped
+  class(out) = "cpt.confset"
+
+  # save under the level key and give back the whole object, not the set. thats what makes
+  # confint just a twin of this. R wont edit in place so it only sticks if they reassign,
+  # fit = confidence_set(fit, 0.95), then read it back with conf.set(fit)[["0.95"]]
+  existing[[as.character(level)]] = out
+  conf.set(object) = existing
+  return(object)
+}
+
+# the half that doesnt need the level: checks, re-run PELT with capture on, shape the C output.
+# level never shows up here so one run covers every level, thats the bit worth caching
+cs_ingredients = function(object){
   if(!is(object, "cpt")){stop("object must be a cpt object, cpt.reg is not supported")}
   # cpt.range slips through the method check (CROPS stores method = PELT) but carries a
   # penalty RANGE not a single value, the maths would run on garbage. MUST add a cpt_range soon
@@ -32,11 +84,6 @@ confidence_set = function(object, level = 0.95) {
   mu = mean(data)
   sumstat = cbind(c(0, cumsum(coredata(data))), c(0, cumsum(coredata(data)^2)), cumsum(c(0, (coredata(data) - mu)^2)))
 
-  # basic validation of the level here, C does not see it for now. In C (PELTC) we only have an off/on button
-  if(!is.numeric(level) || length(level) != 1 || is.na(level) || level <= 0 || level >= 1){
-    stop("level must be a single number strictly between 0 and 1") # this is not used by C yet
-  }
-
   # gamma is the only cost function in C that actually reads shape, the fit stores it
   # inside param.est (see the param method in cpt.class.R) so we can recover it from the object
   shape = 1
@@ -61,35 +108,20 @@ confidence_set = function(object, level = 0.95) {
          likes = as.numeric(pelt$checklist_likes[i, keep]))
   })
 
-  # the actual confidence set calculation, all validated against Owens code
-  # CS / CS.likes / cs.penalty stay internal (backtrack needs them), the user does not see them
-  lcc = as.numeric(pelt$lastchangecpts)
-  core = cs_core(pelt$cpts, checklists, cs_no_op_cpts(lcc), pen.value(object), level = level)
-  segs = cs_backtrack(lcc, core$CS, pelt$cpts)
+  return(list(
+    cpts = pelt$cpts,
+    checklists = checklists,
+    lcc = as.numeric(pelt$lastchangecpts),
+    penalty = pen.value(object)
+  ))
+}
 
-  # tidy the segmentations for the user (mentors direction: show segmentations + optimal cpts only).
-  # cs_backtrack gives segs[[k]] = the segmentations with k cpts, but with NULL holes at the ks that
-  # have none and leftover rbind rownames, so: drop the holes, force every entry into a one row per
-  # segmentation matrix, clear the junk rownames and name each entry by its cpt count (n counts as one)
-  segs = segs[!vapply(segs, is.null, logical(1))]
-  segs = lapply(segs, function(s){
-    if(is.null(dim(s))){ s = matrix(s, nrow = 1) }
-    dimnames(s) = NULL # drop the junk rbind rownames entirely, no col names either
-    # "unique" keeps first occurence order and the backtrack seeds the optimal first,
-    # thus the first row is ALWAYS a row of the optimal cpts
-    unique(s)
-  })
-  names(segs) = vapply(segs, ncol, integer(1))
-
-  out = list(
-    level = level,
-    cpts = pelt$cpts, # optimal cpts, n included as the last one
-    segmentations = segs # [["k"]] = all plausible segmentations with k cpts
-  )
-  # slap a tiny S3 class on top just so it prints nice, underneath it is still a plain list
-  # and segmentations still has the whole conf set in it, optimal included, nothing dropped
-  class(out) = "cpt.confset"
-  return(out)
+# quick level check, C never sees it (PELTC just has an on/off). its own function now
+# so confint can run it early too
+cs_check_level = function(level){
+  if(!is.numeric(level) || length(level) != 1 || is.na(level) || level <= 0 || level >= 1){
+    stop("level must be a single number strictly between 0 and 1") # this is not used by C yet
+  }
 }
 
 # printing the confidence set: optimal cpts first, then everything else as alternatives.

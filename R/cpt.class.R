@@ -235,11 +235,9 @@ setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character"
 # Notice that parm is not used, it is added for compatibility with the generic;
 # it might be used for something in the future but currently it is redundant.
 	setMethod("confint","cpt",function(object, parm, level=0.95, ...){
-	  new.entry = confidence_set(object, level=level)
-	  existing = conf.set(object)
-	  existing[[as.character(level)]] = new.entry
-	  conf.set(object) = existing
-	  return(object)
+	  # identical twin of confidence_set on purpose: same computation, same storing in the
+	  # conf.set slot, same return. Just the name that stats users already know from lm/glm.
+	  return(confidence_set(object, level=level))
 	})
 
 # ncpts function

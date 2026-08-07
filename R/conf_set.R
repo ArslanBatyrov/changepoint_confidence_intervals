@@ -61,7 +61,7 @@ cs_ingredients = function(object){
   if(!is(object, "cpt")){stop("object must be a cpt object, cpt.reg is not supported")}
   # cpt.range slips through the method check (CROPS stores method = PELT) but carries a
   # penalty RANGE not a single value, the maths would run on garbage. MUST add a cpt_range soon
-  if(is(object, "cpt.range")){stop("confidence sets are not yet supported for cpt.range objects (e.g. CROPS fits)")}
+  if(is(object, "cpt.range")){stop("confidence sets are not yet supported for BinSeg, SegNeigh or CROPS fits (cpt.range objects)")}
   if(object@method != "PELT"){stop("confidence sets are currently only implemented for method = 'PELT'")}
 
   # Turning the human-readable test.stat into a C-readable cost-function key

@@ -222,7 +222,14 @@ setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character"
 		}
 		setGeneric("conf.set", fun)
 	}
-	setMethod("conf.set","cpt",function(object) object@conf.set)
+	# the slot is typed "list" so S4 refuses to hold a classed list, so we put the class on
+	# here on the way out (just for printing) and the setter takes it off on the way back in.
+	# left alone when empty so a fresh fit still gives a plain list() like before
+	setMethod("conf.set","cpt",function(object){
+	  out = object@conf.set
+	  if(length(out) > 0){ class(out) = "cpt.confsets" }
+	  return(out)
+	})
 	setMethod("conf.set","cpt.reg",function(object) object@conf.set)
 
 
@@ -237,6 +244,11 @@ setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character"
 	setMethod("confint","cpt",function(object, parm, level=0.95, ...){
 	  # identical twin of confidence_set on purpose: same computation, same storing in the
 	  # conf.set slot, same return. Just the name that stats users already know from lm/glm.
+	  # parm is useless for a cpt (nothing to pick from) but it sits before level in the
+	  # generic, so confint(fit, 0.99) would quietly land 0.99 in parm and run 0.95 instead.
+	  # catch that and read it as the level, its obviously what they meant. only for numbers
+	  # though, a string parm (lm style) is just ignored like the docs say
+	  if(!missing(parm) && missing(level) && is.numeric(parm)){ level = parm }
 	  return(confidence_set(object, level=level))
 	})
 
@@ -428,11 +440,13 @@ setClass("cpt",slots=list(data.set="ts", cpttype="character", method="character"
 
 	setGeneric("conf.set<-", function(object, value) standardGeneric("conf.set<-"))
 	setReplaceMethod("conf.set", "cpt", function(object, value) {
-		object@conf.set <- value
+		# strip the print class the getter added, the slot only accepts a plain list
+		object@conf.set <- unclass(value)
 		return(object)
 	})
 	setReplaceMethod("conf.set", "cpt.reg", function(object, value) {
-		object@conf.set <- value
+		# same unclass as the cpt setter, else copying a conf.set over from a cpt object errors
+		object@conf.set <- unclass(value)
 		return(object)
 	})
 

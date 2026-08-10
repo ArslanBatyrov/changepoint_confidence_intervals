@@ -12,5 +12,6 @@ exportMethods(plot,summary,show,nseg,logLik,likelihood,fitted,residuals,data.set
 	"pen.value<-", "method<-", "cpts.full<-", "minseglen<-","pen.value.full<-","conf.set<-")
 
 S3method(print, cpt.confset)
+S3method(print, cpt.confsets)
 
 useDynLib(changepoint, .registration=TRUE)

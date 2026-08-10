@@ -6,6 +6,9 @@
 # In the docs, we will describe conf_set only.
 
 confidence_set = function(object, level = 0.95) {
+  # check the object BEFORE touching the slot, otherwise conf.set() below blows up first. Added after I found out the bug and fixed it. 
+  # with an ugly S4 dispatch error instead of our own message
+  cs_check_object(object)
   cs_check_level(level)
 
   # use the slot as a cache. the pricey bit (PELT + capture) is in cs_ingredients and
@@ -58,11 +61,7 @@ confidence_set = function(object, level = 0.95) {
 # the half that doesnt need the level: checks, re-run PELT with capture on, shape the C output.
 # level never shows up here so one run covers every level, thats the bit worth caching
 cs_ingredients = function(object){
-  if(!is(object, "cpt")){stop("object must be a cpt object, cpt.reg is not supported")}
-  # cpt.range slips through the method check (CROPS stores method = PELT) but carries a
-  # penalty RANGE not a single value, the maths would run on garbage. MUST add a cpt_range soon
-  if(is(object, "cpt.range")){stop("confidence sets are not yet supported for BinSeg, SegNeigh or CROPS fits (cpt.range objects)")}
-  if(object@method != "PELT"){stop("confidence sets are currently only implemented for method = 'PELT'")}
+  cs_check_object(object)
 
   # Turning the human-readable test.stat into a C-readable cost-function key
   # opened up past Normal on mentors direction: we only wire the strings here (dist agnostic),
@@ -116,17 +115,49 @@ cs_ingredients = function(object){
   ))
 }
 
-# quick level check, C never sees it (PELTC just has an on/off). its own function now
-# so confint can run it early too
+# the object guards (safety checks), made own function so confidence_set can run them before it reads the slot efficiently. 
+cs_check_object = function(object){
+  if(!is(object, "cpt")){stop("object must be a cpt object, cpt.reg is not supported")}
+  # cpt.range slips through the method check (CROPS stores method = PELT) but carries a
+  # penalty RANGE not a single value, the maths would run on garbage. MUST add a cpt_range soon
+  if(is(object, "cpt.range")){stop("confidence sets are not yet supported for BinSeg, SegNeigh or CROPS fits (cpt.range objects)")}
+  if(object@method != "PELT"){stop("confidence sets are currently only implemented for method = 'PELT'")}
+}
+
+# quick level check, C never sees it (PELTC just has an on/off)
 cs_check_level = function(level){
   if(!is.numeric(level) || length(level) != 1 || is.na(level) || level <= 0 || level >= 1){
     stop("level must be a single number strictly between 0 and 1") # this is not used by C yet
   }
 }
 
+# printing the WHOLE slot, ie what you get from conf.set(fit) with no key. hides the
+# ingredients cache (its our internal plumbing, a huge blob of numbers, no use to anyone)
+# and prints each stored level through the single set method below
+print.cpt.confsets = function(x, n = getOption("changepoint.confset.n", 20), ...){
+  lv = setdiff(names(x), "ingredients")
+  if(length(lv) == 0){
+    cat("No confidence sets stored yet, use confidence_set(fit, level) to add one.\n")
+    return(invisible(x))
+  }
+  lv = lv[order(as.numeric(lv))] # nicer to read low to high, not the order they were added
+  cat("Confidence sets stored at ", length(lv), " level(s): ", paste(lv, collapse = ", "), "\n", sep = "")
+  for(l in lv){
+    cat("\n")
+    print(x[[l]], n = n) # hand the cap down so print(conf.set(fit), n = Inf) works too
+  }
+  if("ingredients" %in% names(x)){
+    cat("\n(raw PELT output is cached in here too, hidden as its not for the user)\n") # This just a transparency note, so not necessary but just to let know.
+  }
+  invisible(x)
+}
+
 # printing the confidence set: optimal cpts first, then everything else as alternatives.
 # the optimal is still inside segmentations, we just pull it out for the display
-print.cpt.confset = function(x, ...){
+# n is how many alternatives to show. In the v1 I had a hard cap of 20, was pretty dumb as we need to give users flexibility, so I created a soft cap. It's just made so that a big set cannot flood the
+# console, print(x, n = 50) or n = Inf shows more. the default can also be moved for good as 20 is in no way derived from a special calculation, just what seemed reasonable at the moment.
+# with options(changepoint.confset.n = 50) so you dont have to keep typing it
+print.cpt.confset = function(x, n = getOption("changepoint.confset.n", 20), ...){
   cat("Confidence set (level = ", x$level, ")\n\n", sep = "")
   cat("Optimal changepoints:\n  ", paste(x$cpts, collapse = " "), "\n", sep = "")
 
@@ -144,13 +175,14 @@ print.cpt.confset = function(x, ...){
     cat("\nNo alternative segmentations at this level.\n")
   } else {
     cat("\nAlternative segmentations (", length(alts), "):\n", sep = "")
-    # cap the print so a big confidence set cannot flood the console, the data is all still there
-    show_n = min(length(alts), 20)
+    # only a display cap, the data is all still there in $segmentations
+    show_n = min(length(alts), n)
     for(i in seq_len(show_n)){
       cat("  ", paste(alts[[i]], collapse = " "), "\n", sep = "")
     }
     if(length(alts) > show_n){
-      cat("  ... and ", length(alts) - show_n, " more (see $segmentations)\n", sep = "")
+      # tell them exactly what to type, otherwise they have no way of knowing they can
+      cat("  ... and ", length(alts) - show_n, " more, use print(x, n = Inf) to see all\n", sep = "")
     }
   }
   invisible(x)

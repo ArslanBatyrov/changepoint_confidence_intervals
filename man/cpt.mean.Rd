@@ -85,7 +85,7 @@ Rebecca Killick
 
 
 \seealso{
-\code{\link{cpt.var}},\code{\link{cpt.meanvar}},\code{\link{plot-methods}},\code{\linkS4class{cpt}}
+\code{\link{cpt.var}},\code{\link{cpt.meanvar}},\code{\link{confidence_set}},\code{\link{plot-methods}},\code{\linkS4class{cpt}}
 }
 \examples{
 # Example of a change in mean at 100 in simulated normal data

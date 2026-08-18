@@ -21,30 +21,38 @@ confidence_set = function(object, level = 0.95) {
     existing[["ingredients"]] = ing
   }
 
-  # the actual confidence set calculation, all validated against Owens code
-  # CS / CS.likes / cs.penalty stay internal (backtrack needs them), the user does not see them
-  # (MIGHT NEED TO ADD CS.likes to the output in the future though!)
+  # the actual confidence set calculation, all validated against Owens code.
+  # CS / CS.likes stay internal (backtrack needs them). the gap of each segmentation (how much
+  # more it costs than the optimal) and the budget DO reach the user now, see the out list below.
   core = cs_core(ing$cpts, ing$checklists, cs_no_op_cpts(ing$lcc), ing$penalty, level = level)
-  segs = cs_backtrack(ing$lcc, core$CS, ing$cpts)
+  segs = cs_backtrack(ing$lcc, core$CS, ing$cpts, CS_gaps = core$CS.gaps)
+  gaps = attr(segs, "gaps") # parallel to segs, one gap per segmentation row
 
   # tidy the segmentations for the user.
-  # cs_backtrack gives segs[[k]] = the segmentations with k cpts, but with NULL holes at the ks that
-  # have none and leftover rbind rownames, so: drop the holes, force every entry into a one row per
-  # segmentation matrix, clear the junk rownames and name each entry by its cpt count (n counts as one)
-  segs = segs[!vapply(segs, is.null, logical(1))]
-  segs = lapply(segs, function(s){
+  # cs_backtrack gives segs[[k]] = the segmentations with k cpts (gaps[[k]] = their extra cost),
+  # but with NULL holes at the empty ks and leftover rbind rownames. drop the holes from both,
+  # force a one row per segmentation matrix, clear the junk rownames, dedup the rows AND their
+  # gaps together, and name each entry by its cpt count (n counts as one)
+  keep_k = !vapply(segs, is.null, logical(1))
+  segs = segs[keep_k]; gaps = gaps[keep_k]
+  for(k in seq_along(segs)){
+    s = segs[[k]]
     if(is.null(dim(s))){ s = matrix(s, nrow = 1) }
     dimnames(s) = NULL # drop the junk rbind rownames entirely, no col names either
-    # "unique" keeps first occurence order and the backtrack seeds the optimal first,
-    # thus the first row is ALWAYS a row of the optimal cpts
-    unique(s)
-  })
-  names(segs) = vapply(segs, ncol, integer(1))
+    # !duplicated gives a mask we apply to the rows AND the matching gaps so they stay lined up.
+    # keeps first occurence, and the backtrack seeds the optimal first, so row 1 is the optimal
+    mask = !duplicated(s)
+    segs[[k]] = s[mask, , drop = FALSE]
+    gaps[[k]] = gaps[[k]][mask]
+  }
+  names(segs) = names(gaps) = vapply(segs, ncol, integer(1))
 
   out = list(
     level = level,
     cpts = ing$cpts, # optimal cpts, n included as the last one
-    segmentations = segs # [["k"]] = all plausible segmentations with k cpts
+    segmentations = segs, # [["k"]] = all plausible segmentations with k cpts
+    gaps = gaps, # [["k"]] = each segmentations extra cost vs the optimal, same order as the rows
+    budget = core$cs.penalty # the cost budget the gaps live inside, 0 <= gap <= budget
   )
   # slap a tiny S3 class on top just so it prints nice, underneath it is still a plain list
   # and segmentations still has the whole conf set in it, optimal included, nothing dropped
@@ -161,28 +169,37 @@ print.cpt.confset = function(x, n = getOption("changepoint.confset.n", 20), ...)
   cat("Confidence set (level = ", x$level, ")\n\n", sep = "")
   cat("Optimal changepoints:\n  ", paste(x$cpts, collapse = " "), "\n", sep = "")
 
-  # walk every segmentation group and keep the rows that are not the optimal one
-  alts = list()
-  for(g in x$segmentations){
+  # walk every group and collect the alternatives with their gap. the optimal is the gap 0 row,
+  # so keeping gap > 0 drops it cleanly, no need to compare each row against cpts
+  rows = list(); gap = numeric(0)
+  for(k in names(x$segmentations)){
+    g = x$segmentations[[k]]; gk = x$gaps[[k]]
     for(r in seq_len(nrow(g))){
-      if(!identical(as.numeric(g[r, ]), as.numeric(x$cpts))){
-        alts[[length(alts) + 1]] = g[r, ]
+      if(gk[r] > 0){
+        rows[[length(rows) + 1]] = g[r, ]
+        gap = c(gap, gk[r])
       }
     }
   }
 
-  if(length(alts) == 0){
+  if(length(rows) == 0){
     cat("\nNo alternative segmentations at this level.\n")
   } else {
-    cat("\nAlternative segmentations (", length(alts), "):\n", sep = "")
+    ord = order(gap) # smallest extra cost first, ie most plausible alternatives at the top
+    rows = rows[ord]; gap = gap[ord]
+    cat("\nAlternative segmentations (", length(rows), "), extra cost vs optimal (budget ",
+        formatC(x$budget, format = "f", digits = 2), "):\n", sep = "")
     # only a display cap, the data is all still there in $segmentations
-    show_n = min(length(alts), n)
+    show_n = min(length(rows), n)
+    seg_str = vapply(rows[seq_len(show_n)], function(r) paste(r, collapse = " "), character(1))
+    w = max(nchar(seg_str)) # pad so the gap column lines up
     for(i in seq_len(show_n)){
-      cat("  ", paste(alts[[i]], collapse = " "), "\n", sep = "")
+      cat("  ", formatC(seg_str[i], width = -w), "   +",
+          formatC(gap[i], format = "f", digits = 2), "\n", sep = "")
     }
-    if(length(alts) > show_n){
+    if(length(rows) > show_n){
       # tell them exactly what to type, otherwise they have no way of knowing they can
-      cat("  ... and ", length(alts) - show_n, " more, use print(x, n = Inf) to see all\n", sep = "")
+      cat("  ... and ", length(rows) - show_n, " more, use print(x, n = Inf) to see all\n", sep = "")
     }
   }
   invisible(x)
@@ -235,7 +252,7 @@ cs_core = function(op_cpts, checklists, no_op_cpts, penalty, level=0.95, cs.pena
   n = op_cpts[length(op_cpts)]
   if(is.null(cs.penalty)){ cs.penalty = cs_penalty(op_cpts, alpha) }
 
-  CS = CS.likes = matrix(NA_real_, nrow=length(cpts)-1, ncol=n)
+  CS = CS.likes = CS.gaps = matrix(NA_real_, nrow=length(cpts)-1, ncol=n)
   for(i in length(cpts):2){
     x = checklists[[i-1]]$positions # near miss candidates at time cpts[i]
     y = checklists[[i-1]]$likes # thier pure costs
@@ -249,8 +266,11 @@ cs_core = function(op_cpts, checklists, no_op_cpts, penalty, level=0.95, cs.pena
     CSvals.index = which(semipurelikes >= op.like & semipurelikes <= op.like + cs.penalty)
     CS.likes[i-1, seq_along(CSvals.index)] = semipurelikes[CSvals.index]
     CS[i-1, seq_along(CSvals.index)] = x[CSvals.index]
+    # the gap: how much more each candidate costs than the optimal, same scale as the budget.
+    # exact because a deviating segmentation shares the optimal suffix, only this rows cost moves
+    CS.gaps[i-1, seq_along(CSvals.index)] = semipurelikes[CSvals.index] - op.like
   }
-  return(list(CS=CS, CS.likes=CS.likes, cs.penalty=cs.penalty))
+  return(list(CS=CS, CS.likes=CS.likes, CS.gaps=CS.gaps, cs.penalty=cs.penalty))
 }
 
 # the "bunny hop", walks the backpionters back untill 0
@@ -263,27 +283,42 @@ cs_op_seg = function(fcpt=NULL, last, lastchangecpts){
 }
 
 # CS matrix -> whole alternitive segmentaions, out[[k]] = the ones with k cpts
-# (n counts as one aswell)
-cs_backtrack = function(lastchangecpts, CS_mat, est_cpts){
+# (n counts as one aswell). CS_gaps is optional: when given (the CS.gaps matrix from cs_core)
+# we build a parallel gap list, one gap per segmentation row, and hang it off out as an
+# attribute. left NULL the function behaves exactly as before, so the old callers/tests are safe
+cs_backtrack = function(lastchangecpts, CS_mat, est_cpts, CS_gaps=NULL){
+  keep_gaps = !is.null(CS_gaps)
   out = list()
   out[[length(est_cpts)]] = est_cpts
+  gaps = list()
+  if(keep_gaps){ gaps[[length(est_cpts)]] = 0 } # the seed row is the optimal, gap 0
   fcpt = NULL
   for(cpt.i in nrow(CS_mat):1){
     fcpt = c(fcpt, est_cpts[cpt.i]) # fixing the optimal cpts later then this row
     CS.vec = CS_mat[cpt.i, !is.na(CS_mat[cpt.i,])]
     for(CS.vec.i in seq_along(CS.vec)){
+      gap = if(keep_gaps) CS_gaps[cpt.i, CS.vec.i] else NA_real_ # same column the position came from
       if(CS.vec[CS.vec.i] == 0){
-        # candidate 0 = no earlier cpt, segmentation is just fcpt
-        out[[length(fcpt)]] = rbind(out[[length(fcpt)]], sort(fcpt))
+        # candidate 0 = no earlier cpt, segmentation is just fcpt. k <= length(est_cpts) here so
+        # both out[[k]] and gaps[[k]] already exist, safe to read and append
+        k = length(fcpt)
+        out[[k]] = rbind(out[[k]], sort(fcpt))
+        if(keep_gaps){ gaps[[k]] = c(gaps[[k]], gap) }
       } else {
         seg = cs_op_seg(fcpt=fcpt, last=CS.vec[CS.vec.i], lastchangecpts=lastchangecpts)
-        if(length(seg) > length(out)){
-          out[[length(seg)]] = seg
+        k = length(seg)
+        # a brand new k (longer segmentation): assign, never READ out[[k]]/gaps[[k]] as [[ ]]
+        # errors past the list end. out and gaps grow together so length(out) gates both
+        if(k > length(out)){
+          out[[k]] = seg
+          if(keep_gaps){ gaps[[k]] = gap }
         } else {
-          out[[length(seg)]] = rbind(out[[length(seg)]], seg)
+          out[[k]] = rbind(out[[k]], seg)
+          if(keep_gaps){ gaps[[k]] = c(gaps[[k]], gap) }
         }
       }
     }
   }
+  if(keep_gaps){ attr(out, "gaps") = gaps }
   return(out)
 }

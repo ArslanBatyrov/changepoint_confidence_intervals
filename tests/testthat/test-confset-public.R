@@ -31,7 +31,7 @@ test_that("confidence_set stores the set in the slot and hands the object back",
 
   cs = conf.set(out)[["0.95"]]
   expect_s3_class(cs, "cpt.confset")
-  expect_equal(names(cs), c("level","cpts","segmentations"))
+  expect_equal(names(cs), c("level","cpts","segmentations","gaps","budget"))
   expect_equal(as.numeric(cs$cpts), as.numeric(c(cpts(fit), length(data.set(fit)))))
 })
 
@@ -85,6 +85,31 @@ test_that("segmentations are tidy: no holes, no rownames, no duplicates, named b
     expect_equal(nrow(g), nrow(unique(g)))
     expect_equal(ncol(g), as.integer(k))
   }
+})
+
+test_that("each segmentation carries a gap: aligned, in [0, budget], optimal is 0", {
+  cs = set_of(fit_of(), 0.99)
+  for(k in names(cs$segmentations)){
+    # one gap per segmentation row, and they line up
+    expect_equal(length(cs$gaps[[k]]), nrow(cs$segmentations[[k]]))
+  }
+  g = unlist(cs$gaps)
+  expect_true(all(g >= 0))
+  expect_true(all(g <= cs$budget + 1e-9))
+  # the optimal segmentation is the only gap-0 row (dedup keeps it once)
+  opt_k = as.character(length(cs$cpts))
+  expect_equal(cs$gaps[[opt_k]][1], 0)
+  expect_equal(sum(g == 0), 1)
+})
+
+test_that("printing shows the gap column, sorted, with the budget in the header", {
+  cs = set_of(fit_of(), 0.99)
+  txt = capture.output(print(cs))
+  expect_true(any(grepl("extra cost vs optimal \\(budget", txt)))
+  expect_true(any(grepl("\\+[0-9]+\\.[0-9]{2}", txt))) # a +N.NN gap appears
+  # alternatives are sorted smallest gap first: pull the printed gaps and check ascending
+  printed = as.numeric(sub(".*\\+([0-9.]+)\\s*$", "\\1", grep("\\+[0-9]", txt, value=TRUE)))
+  expect_false(is.unsorted(printed))
 })
 
 test_that("every PELT distribution and the MBIC keys run through the public path", {

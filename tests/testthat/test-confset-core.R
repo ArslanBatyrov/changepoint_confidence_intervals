@@ -38,6 +38,21 @@ test_that("cs_core keeps exactly the candidates within the budget", {
   expect_true(all(is.na(res$CS[1, 3:10])))
   expect_equal(res$CS.likes[1, 1:2], c(20, 23))
   expect_equal(res$cs.penalty, 10)
+  # the gap is semipure minus the optimal (20): 20-20=0 for the optimal, 23-20=3 for the other
+  expect_equal(res$CS.gaps[1, 1:2], c(0, 3))
+})
+
+test_that("cs_core gaps are non-negative, within budget, and 0 for the optimal", {
+  set.seed(7)
+  data = c(rnorm(50), rnorm(50)+2.5)
+  mock = mock_pelt_checklist(data, 2*log(100))
+  core = changepoint:::cs_core(mock$op_cpts, mock$checklists, mock$no_op_cpts,
+                               mock$penalty, level=0.95)
+  g = core$CS.gaps[!is.na(core$CS.gaps)]
+  expect_true(all(g >= 0))
+  expect_true(all(g <= core$cs.penalty + 1e-9))
+  # the optimal candidate sits in every row and its gap is exactly 0
+  expect_true(all(apply(core$CS.gaps, 1, function(r) any(abs(r[!is.na(r)]) < 1e-9))))
 })
 
 test_that("cs_core errors if the optimal changepoint is missing from a checklist", {

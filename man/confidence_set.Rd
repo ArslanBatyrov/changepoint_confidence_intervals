@@ -52,6 +52,8 @@ confidence_set(object, level = 0.95)
 	\item{level}{The confidence level.}
 	\item{cpts}{The best changepoints, ending with n.}
 	\item{segmentations}{The plausible segmentations, grouped by how many changepoints they have (n counts as one), one per row.  The best one is included.}
+	\item{gaps}{Same shape as \code{segmentations}: for each segmentation, how much more it costs than the best one.  0 for the best segmentation, larger for less plausible ones, never more than \code{budget}.  This is a cost difference on the same scale as the budget, NOT a log-likelihood (the cost functions drop a constant term), so read it only as "how far from optimal".}
+	\item{budget}{The cost budget for this level.  Every gap lies in [0, budget]; a bigger level gives a bigger budget and so a bigger set.}
 }
 \references{
 PELT Algorithm: Killick R, Fearnhead P, Eckley IA (2012) Optimal detection of changepoints with a linear computational cost, \emph{JASA} \bold{107(500)}, 1590--1598

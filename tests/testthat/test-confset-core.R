@@ -37,9 +37,31 @@ test_that("cs_core keeps exactly the candidates within the budget", {
   expect_equal(res$CS[1, 1:2], c(0, 4))
   expect_true(all(is.na(res$CS[1, 3:10])))
   expect_equal(res$CS.likes[1, 1:2], c(20, 23))
-  expect_equal(res$cs.penalty, 10)
+  # budget 10 was asked for, but Owens rule caps it at the penalty (5). the window becomes
+  # [20,25], which still keeps 20 and 23 and still drops 35, so only the reported budget moves
+  expect_equal(res$cs.penalty, 5)
   # the gap is semipure minus the optimal (20): 20-20=0 for the optimal, 23-20=3 for the other
   expect_equal(res$CS.gaps[1, 1:2], c(0, 3))
+})
+
+test_that("cs_core caps the budget at the PELT pruning penalty (Owens rule)", {
+  # same hand built case: semipure costs 20, 23, 35 with the optimal at 20
+  no_op = c(-1, rep(0, 10))
+  run = function(bud){
+    changepoint:::cs_core(op_cpts = c(10),
+                          checklists = list(list(positions=c(0,4,6), likes=c(20,18,30))),
+                          no_op_cpts = no_op, penalty = 5, cs.penalty = bud)
+  }
+  # a budget bigger than the penalty is pulled down to the penalty
+  expect_equal(run(100)$cs.penalty, 5)
+  # a budget smaller than the penalty is left alone, it is a min not a replace
+  expect_equal(run(2)$cs.penalty, 2)
+  # and the cap really bites: uncapped at 100 the window would be [20,120] and candidate
+  # 6 (semipure 35) would be kept, capped at 5 the window is [20,25] so it is not
+  kept = run(100)$CS[1, ]
+  expect_false(6 %in% kept[!is.na(kept)])
+  # a tighter budget shrinks the set, never grows it
+  expect_true(sum(!is.na(run(2)$CS[1,])) <= sum(!is.na(run(100)$CS[1,])))
 })
 
 test_that("cs_core gaps are non-negative, within budget, and 0 for the optimal", {

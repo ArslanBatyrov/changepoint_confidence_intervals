@@ -3,7 +3,7 @@
 # required to calculate the confidence sets and then calculates it.
 # Also, a little later on, I will make confint call this.
 # We will have two functions doing the same thing to make it more comfortable for users.
-# In the docs, we will describe conf_set only.
+# In the docs, I will describe conf_set only. Just making small remark on confint because we want people to use the conf_set (maybe also later on call it confset?)
 
 confidence_set = function(object, level = 0.95) {
   # check the object BEFORE touching the slot, otherwise conf.set() below blows up first. Added after I found out the bug and fixed it. 
@@ -251,6 +251,11 @@ cs_core = function(op_cpts, checklists, no_op_cpts, penalty, level=0.95, cs.pena
   cpts = c(0, op_cpts)
   n = op_cpts[length(op_cpts)]
   if(is.null(cs.penalty)){ cs.penalty = cs_penalty(op_cpts, alpha) }
+  # Owens rule (his line 106 in PELT_CS_fns.R, now switched on): the budget never goes
+  # past the PELT pruning penalty. anything PELT pruned can never be optimal so it does
+  # not belong in the set anyway, and past ~0.99 a bigger budget should not keep growing
+  # the set forever. outside the if on purpose so a hand passed budget is capped too
+  cs.penalty = min(cs.penalty, penalty)
 
   CS = CS.likes = CS.gaps = matrix(NA_real_, nrow=length(cpts)-1, ncol=n)
   for(i in length(cpts):2){
